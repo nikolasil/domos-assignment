@@ -1,6 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 import logging
+import asyncio
 from config.settings import settings
 
 # Configure logger
@@ -14,11 +15,18 @@ class SMTPSender:
         self.user: str = settings.SMTP_USER
         self.password: str = settings.SMTP_PASSWORD
 
-    def send_email(self, to: str, subject: str, body: str) -> None:
+    async def send_email_async(self, to: str, subject: str, body: str) -> None:
         """
-        Sends an email via SMTP_SSL.
+        Sends an email asynchronously via SMTP_SSL using a thread pool.
         """
-        msg: MIMEText = MIMEText(body)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._send_email_sync, to, subject, body)
+
+    def _send_email_sync(self, to: str, subject: str, body: str) -> None:
+        """
+        Synchronous email sending logic (used internally by async wrapper).
+        """
+        msg = MIMEText(body)
         msg["From"] = self.user
         msg["To"] = to
         msg["Subject"] = subject
