@@ -42,6 +42,15 @@ Defaults:
 Tickets are saved under:
 output/*.json
 
+#### Non-Functional
+
+✅ Clean modular project layout
+✅ Python ≥ 3.10
+✅ Async-friendly LLM integration with OpenAI
+✅ Mimicked data is sufficient for testing
+✅ No deployment required
+✅ Dependencies listed in requirements.txt
+
 ## INFO
 
 1. **Connect to an Inbox**
@@ -81,20 +90,6 @@ Emails include generated reply and relevant stakeholders (e.g., maintenance team
 
 Tradeoff: No retry/backoff currently; network errors are logged.
 
-## Non-Functional Expectations
-
-✅ Clean modular project layout
-
-✅ Python ≥ 3.10
-
-✅ Async-friendly LLM integration with OpenAI
-
-✅ Mimicked data is sufficient for testing
-
-✅ No deployment required
-
-✅ Dependencies listed in requirements.txt
-
 ## ⚠️ Known Limitations / Tradeoffs
 
 1. **IMAP is partially async**  
@@ -113,35 +108,11 @@ Tradeoff: No retry/backoff currently; network errors are logged.
 6. **No conversation history**  
     The LLM receives only single-email context + tenant/unit info
 
-## Enchancements (Future features)
-
-### 🚀 Product / Infrastructure
-
-- Full Gmail OAuth (instead of passwords / app passwords)
-- Current polling every 2 seconds should be replaced with a more efficient method, like IMAP IDLE or Gmail push notifications.
-- Dockerization
-- Web dashboard to view tickets, logs, and email threads
-- Postgres persistence for emails and workflows
-- Prometheus metrics
-
-### ⚙️ Backend / Code Quality
-
-- Unit tests & integration tests (pytest)
-- Retry & backoff strategy for IMAP/SMTP/LLM.
-    Now there is only a generic retry for the whole process of handling the mail
-- Add internal event bus (Redis)
-
-### 🤖 AI Enhancements
-
-- Embedding-based similarity search for conversation history
-- Fine-tuning or RAG prompts for more consistent replies
-- Evaluation metrics ("response correctness", "hallucination score")
-
-### 🤖 AI Notes
+## 🤖 AI Notes
 
 Used ChatGPT (GPT-4/GPT-5) for architecture planning, async design, prompt design, and refactoring guidance.
 
-AI assisted with:
+#### AI assisted with:
 
 - Designing the modular folder structure
 - Constructing async patterns (semaphores, task spawning, executors)
@@ -151,15 +122,39 @@ AI assisted with:
 - Improving system robustness and readability
 - Even with the documentation (README.md)
 
-What worked well
+#### What worked well
 
 - Iterating on design and async concurrency model
 - Generating high-quality boilerplate while focusing on core logic
 - IMAP/SMTP Snippets
 
-Challenges
+#### Challenges
 
 - IMAP & SMTP async libraries
 - Maintaining clean async patterns
 - Ensuring LLM always returns valid JSON (needed careful prompting)
 - Ensuring the LLM email answer was correct
+
+## Enchancements (Future features)
+
+#### 🚀 Product / Infrastructure
+
+- Full Gmail OAuth (instead of passwords / app passwords)
+- Current polling every 2 seconds should be replaced with a more efficient method, like IMAP IDLE or Gmail push notifications.
+- Dockerization
+- Web dashboard to view tickets, logs, and email threads
+- Postgres persistence for emails and workflows
+- Prometheus metrics
+
+#### ⚙️ Backend / Code Quality
+
+- Unit tests & integration tests (pytest)
+- Retry & backoff strategy for IMAP/SMTP/LLM.
+    Now there is only a generic retry for the whole process of handling the mail
+- Add internal event bus (Redis)
+
+#### 🤖 AI Enhancements
+
+- Embedding-based similarity search for conversation history
+- Fine-tuning or RAG prompts for more consistent replies
+- Evaluation metrics ("response correctness", "hallucination score")
