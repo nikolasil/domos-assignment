@@ -2,6 +2,7 @@ import aiosmtplib
 from email.mime.text import MIMEText
 import logging
 from config.settings import settings
+from contextlib import asynccontextmanager
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -14,10 +15,35 @@ class SMTPSender:
         self.port: int = getattr(settings, "SMTP_PORT", 465)
         self.user: str = settings.SMTP_USER
         self.password: str = settings.SMTP_PASSWORD
-
-    async def send_email_async(self, to: str, subject: str, body: str) -> None:
+        
+    @asynccontextmanager
+    async def connection(self):
         """
-        Sends an email asynchronously using aiosmtplib.
+        Async context manager for a persistent SMTP connection.
+        Usage:
+            async with smtp_sender.connection() as conn:
+                await smtp_sender.send_email_async(..., connection=conn)
+        """
+        conn = aiosmtplib.SMTP(
+            hostname=self.host,
+            port=self.port,
+            username=self.user,
+            password=self.password,
+            use_tls=True,
+        )
+        try:
+            await conn.connect()
+            logger.debug("Connected to SMTP server %s:%s", self.host, self.port)
+            yield conn
+        finally:
+            await conn.quit()
+            logger.debug("Disconnected from SMTP server %s:%s", self.host, self.port)
+
+    async def send_email_async(
+        self, to: str, subject: str, body: str, connection: aiosmtplib.SMTP | None = None
+    ) -> None:
+        """
+        Sends an email asynchronously. If a connection is provided, reuse it.
         """
         msg = MIMEText(body)
         msg["From"] = self.user
@@ -25,15 +51,19 @@ class SMTPSender:
         msg["Subject"] = subject
 
         try:
-            logger.debug("Connecting to SMTP server %s:%s", self.host, self.port)
-            await aiosmtplib.send(
-                msg,
-                hostname=self.host,
-                port=self.port,
-                username=self.user,
-                password=self.password,
-                use_tls=True,
-            )
+            if connection:
+                await connection.send_message(msg)
+            else:
+                # One-off connection
+                await aiosmtplib.send(
+                    msg,
+                    hostname=self.host,
+                    port=self.port,
+                    username=self.user,
+                    password=self.password,
+                    use_tls=True,
+                )
+
             logger.info("Sent email to %s with subject '%s'", to, subject)
 
         except aiosmtplib.SMTPException as e:

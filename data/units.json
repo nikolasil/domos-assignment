@@ -1,19 +1,14 @@
 [
   {
     "unit_id": "U000",
-    "address": "1000 Holland Ave Apt 1F",
-    "maintenance_issues": []
+    "address": "1000 Holland Ave Apt 2F"
   },
   {
     "unit_id": "U001",
-    "address": "2000 Holland Ave Apt 2F",
-    "maintenance_issues": []
+    "address": "2000 Holland Ave Apt 1F"
   },
   {
     "unit_id": "U002",
-    "address": "100 Holland Ave Apt 2D",
-    "maintenance_issues": [
-      { "issue": "Toilet malfunction", "status": "pending" }
-    ]
+    "address": "100 Holland Ave Apt 2D"
   }
 ]

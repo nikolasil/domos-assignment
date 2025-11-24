@@ -1,85 +1,143 @@
 import json
 import logging
-
-from openai import OpenAI
+from openai import AsyncOpenAI
 from config.settings import settings
 from core.models import LLMResponse
+from core.models import Intent
 
-# Configure logging
+# Configure logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 
 
 class LLMClient:
-    def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    SYSTEM_PROMPT = """
+You are an assistant for a property management company.
+Read tenant emails and provide a professional, helpful response.
 
-    def generate_response(self, email, context) -> LLMResponse:
-        """
-        Sends email + context to the model and expects structured JSON output.
-        """
-
-        system_prompt = """
-You are an AI assistant for a property management company.
-Your job is to read tenant emails and provide a professional, helpful response.
-
-Instructions:
+Rules:
 1. Understand the tenant's request fully.
 2. Use the provided context to enhance your reply.
 3. Generate a clear, concise, human-sounding response.
-4. Determine the intent of the email.
+4. Determine the intent of the email (locked_out, maintenance, rent, general).
 5. List any action items needed.
+6. NEVER reveal that you are an AI.
+7. Output **strict JSON only**, no extra text, no greetings, no commentary.
 
-Output JSON ONLY in the following schema:
+Output JSON schema:
 {
-  "reply": "<string>",                # The text to send back to the tenant
+  "reply": "<string>",
   "intent": "<locked_out | maintenance | rent | general>",
   "action_items": [
       { "type": "<string>", "details": "<string>" }
   ]
 }
 
-Rules:
-- "locked_out": if tenant is locked out of property.
-- "maintenance": if tenant mentions repairs, broken items, or issues needing attention.
-- "rent": if tenant asks about rent, payment, or balance.
-- "general": for anything else.
-- action_items must be [] if no action is required.
-- Always return valid JSON only, no extra commentary or text outside JSON.
-- Keep replies professional, polite, and helpful.
-"""
+Intent rules:
+- "locked_out": tenant is locked out of property. Action required.
+- "maintenance": tenant mentions repairs or issues. Action required.
+- "rent": tenant asks about rent or payment. Action may be required.
+- "general": anything else. Action may be optional.
 
-        user_prompt = f"""
+Rules for action_items:
+- Provide a list of actionable tasks if needed
+- Leave empty list [] if no action required
+- Always provide concrete action items if the email implies a task.
+- Use structured tasks: "type" = short identifier, "details" = clear description.
+
+Examples:
+
+Example 1:
+Email: "I locked myself out of my apartment."
+Output:
+{
+  "reply": "I understand that you are locked out. We are arranging access immediately.",
+  "intent": "locked_out",
+  "action_items": [
+    { "type": "call_locksmith", "details": "Call locksmith to provide access to tenant" }
+  ]
+}
+
+Example 2:
+Email: "The heating is broken in my apartment."
+Output:
+{
+  "reply": "Thank you for reporting the heating issue. We will send a technician as soon as possible.",
+  "intent": "maintenance",
+  "action_items": [
+    { "type": "assign_technician", "details": "Send technician to repair heating" }
+  ]
+}
+
+Example 3:
+Email: "I need information about my rent payment."
+Output:
+{
+  "reply": "You can pay your rent via your online account or contact us for assistance.",
+  "intent": "rent",
+  "action_items": []
+}
+
+Example 4:
+Email: "I just wanted to say thank you."
+Output:
+{
+  "reply": "You're welcome! We are happy to help.",
+  "intent": "general",
+  "action_items": []
+}
+""".strip()
+
+    USER_PROMPT_TEMPLATE = """
 EMAIL RECEIVED:
-Subject: {email.subject}
-From: {email.sender}
-Body: {email.body}
+Subject: {subject}
+From: {sender}
+Body: {body}
 
 CONTEXT:
-{json.dumps(context, indent=2)}
+{context_json}
+""".strip()
 
-RULES:
-- Do NOT hallucinate information. If you don't know something, leave it blank or empty string.
-- action_items = [] if no action is required.
-- Always return valid JSON ONLY. No commentary, no greetings, no signatures.
-- Do NOT use placeholders like [insert amount here] or $[Your Name].
-- Keep replies professional, polite, and helpful.
-- Use the data in CONTEXT to have a more full response. Those data are related to the person sending the mail.
-"""
+    def __init__(self):
+        self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+    async def generate_response_async(self, email, context) -> LLMResponse:
+        """
+        Generate LLM response asynchronously using precompiled prompts.
+        """
+        context_json = json.dumps(context, separators=(",", ":"), ensure_ascii=False)
+        user_prompt = self.USER_PROMPT_TEMPLATE.format(
+            subject=email.subject,
+            sender=email.sender,
+            body=email.body,
+            context_json=context_json
+        )
 
         try:
-            completion = self.client.chat.completions.create(
+            completion = await self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": system_prompt.strip()},
-                    {"role": "user", "content": user_prompt.strip()},
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.2,
             )
 
             raw = completion.choices[0].message.content
             data = json.loads(raw)
-            return LLMResponse(**data)
+
+            # Convert intent string to Intent enum
+            intent_value = data.get("intent", "general")
+            if intent_value not in Intent.__members__:
+                intent_enum = Intent.general
+            else:
+                intent_enum = Intent(intent_value)
+
+            return LLMResponse(
+                reply=data.get("reply", ""),
+                intent=intent_enum,
+                action_items=data.get("action_items", [])
+            )
 
         except json.JSONDecodeError:
             logger.warning("LLM returned invalid JSON. Raw output:\n%s", raw)
@@ -89,6 +147,6 @@ RULES:
         # Fallback response
         return LLMResponse(
             reply="Sorry, something went wrong while generating a response.",
-            intent="general",
+            intent=Intent.general,
             action_items=[]
         )

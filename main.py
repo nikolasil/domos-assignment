@@ -8,16 +8,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 
 async def main():
-    processor = PropertyManagerAi(concurrency=10)
-    logger.info("Starting async email assistant...")
+    processor = PropertyManagerAi(concurrency=2, polling=2, max_retries=2, unread_days_back=1)
+    logger.info("Starting async email property manager assistant...")
 
     while True:
         try:
             await processor.run_once()
         except Exception as e:
             logger.error("Error:", e)
-
-        await asyncio.sleep(1)   # async sleep
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -1,7 +1,8 @@
-import imaplib
-import asyncio
-from typing import AsyncGenerator, Optional
 import logging
+from datetime import datetime, timedelta
+from typing import AsyncGenerator, Optional
+
+from aioimaplib import IMAP4_SSL
 from config.settings import settings
 
 # Configure logger
@@ -9,56 +10,70 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 
 
+def is_ok_response(response) -> bool:
+    """Check if aioimaplib response indicates success."""
+    if not response.lines:
+        return False
+    return any(line.startswith(b"OK") or b"Success" in line for line in response.lines)
+
+
 class IMAPReader:
-    def __init__(self):
+    def __init__(self, days_back: int = 1):
         self.host: str = settings.IMAP_HOST
         self.user: str = settings.IMAP_USER
         self.password: str = settings.IMAP_PASSWORD
-
-    def _connect_sync(self) -> imaplib.IMAP4_SSL:
-        """Synchronous connection to IMAP server."""
-        logger.debug("Connecting to IMAP server %s", self.host)
-        mail = imaplib.IMAP4_SSL(self.host)
-        mail.login(self.user, self.password)
-        logger.info("Logged in as %s", self.user)
-        return mail
+        self.days_back = days_back
 
     async def fetch_unread_stream(self) -> AsyncGenerator[bytes, None]:
         """
-        Async generator yielding unread emails one by one.
-        Uses a thread pool internally to avoid blocking the event loop.
+        Fully async IMAP email fetcher using aioimaplib.
+        Streams unread emails from the last N days.
         """
-        loop = asyncio.get_running_loop()
-        mail: imaplib.IMAP4_SSL = await loop.run_in_executor(None, self._connect_sync)
-
+        imap = IMAP4_SSL(self.host)
         try:
-            mail.select("inbox")
-            status, messages_raw = await loop.run_in_executor(None, mail.search, None, "(UNSEEN)")
+            # Connect and wait for server greeting
+            await imap.wait_hello_from_server()
+            await imap.login(self.user, self.password)
+            logger.info(f"Logged in to IMAP as {self.user}")
 
-            if status != "OK" or not messages_raw or not messages_raw[0]:
+            # Select INBOX
+            select_result = await imap.select("INBOX")
+            if not is_ok_response(select_result):
+                logger.error("Failed to select INBOX")
+                return
+
+            # Build search query
+            since_date = (datetime.now() - timedelta(days=self.days_back)).strftime("%d-%b-%Y")
+            search_criteria = f'(UNSEEN SINCE {since_date})'
+
+            # Search for unread messages
+            search_result = await imap.search(search_criteria)
+            if not is_ok_response(search_result) or not search_result.lines:
                 logger.info("No unread emails found.")
                 return
 
-            email_ids = [eid.decode("utf-8") for eid in messages_raw[0].split()]
-            logger.info("Found %d unread emails.", len(email_ids))
+            # Extract message IDs as strings from first line only
+            message_ids = [
+                msg_id.decode() for msg_id in search_result.lines[0].split() if msg_id.isdigit()
+            ]
+            logger.info(f"Found {len(message_ids)} unread emails.")
 
-            for eid in email_ids:
-                fetch_status, fetch_data = await loop.run_in_executor(None, mail.fetch, eid, "(RFC822)")
-                if fetch_status != "OK" or not fetch_data:
-                    logger.warning("Failed to fetch email ID %s", eid)
+            # Fetch each email
+            for msg_id in message_ids:
+                fetch_result = await imap.fetch(msg_id, "RFC822")
+                if not is_ok_response(fetch_result) or not fetch_result.lines:
+                    logger.warning(f"Failed to fetch message ID {msg_id}")
                     continue
 
-                # Extract raw email payload
-                for item in fetch_data:
-                    if isinstance(item, tuple) and len(item) == 2 and isinstance(item[1], (bytes, type(None))):
-                        payload: Optional[bytes] = item[1]
-                        if payload is not None:
-                            yield payload
+                # Extract raw email bytes from lines (usually lines[1] has the email body)
+                raw_email: Optional[bytes] = fetch_result.lines[1] if len(fetch_result.lines) > 1 else fetch_result.lines[0]
 
-        except imaplib.IMAP4.error as e:
-            logger.error("IMAP error: %s", e)
+                if raw_email:
+                    yield raw_email
+
         except Exception as e:
-            logger.exception("Unexpected error while fetching emails: %s", e)
+            logger.exception(f"IMAP error: {e}")
+
         finally:
-            await loop.run_in_executor(None, mail.logout)
-            logger.info("Logged out from IMAP server.")
+            await imap.logout()
+            logger.info("Logged out from IMAP.")
